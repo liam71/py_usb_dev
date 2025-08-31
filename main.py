@@ -580,7 +580,7 @@ elif APP_model_ == NOTIKINTER:
     package = CreatePackage(0x11, ciphertext)
     print("SEND Message") 
     set_control_transfer(0x01 , package)
-    save_image_rgb565_bin("three.png", "test1.bin")
+    save_image_rgb565_bin("image/three.png", "test1.bin")
     send_bytes_over_usb(vid=0x34C7, pid=0x8888, endpoint_out=0x02, directory_path=".")
 
 elif APP_model_ == OTA:
@@ -605,37 +605,8 @@ elif APP_model_ == OTA:
     package = CreatePackage(0x11, ciphertext)
     print("SEND Message") 
     set_control_transfer(0x01 , package)
-    #ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path="1809_bin/GPCM2_CM3_strip_Trans.bin")
-    #GetPanelSourceState()
-    #ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path="1809_bin/GPCM2_CM3_OTA_TEST_3.bin")
-    ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path="1809_bin/GPCM2_CM3_strip_Trans_y.bin")
-    #key1 = [27, 36, 66, 79]
-    # key2 = [79, 84,  0, 56]
-    # binsize = [ 0, 0, 1,  0]
-    # header = [67, 77, 51, 88]
-    # endOTA = [12, 56, 87, 32]
+    ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path="1809_bin/GPCM2_CM3_strip_Trans_b.bin")
 
-    # ascii_list = [ord(c) for c in start]
-
-    # ciphertext = CryptoLib.ecies_encrypt(key1)
-    # package = CreatePackage(0x8a, ciphertext)
-    # print("SEND Message") 
-    # set_control_transfer(0x01 , package)
-
-    # ciphertext = CryptoLib.ecies_encrypt(key2)
-    # package = CreatePackage(0x8a, ciphertext)
-    # print("SEND Message")
-    # set_control_transfer(0x01 , package)
-
-    # ciphertext = CryptoLib.ecies_encrypt(binsize)
-    # package = CreatePackage(0x8a, ciphertext)
-    # print("SEND Message")
-    # set_control_transfer(0x01 , package)
-
-    # ciphertext = CryptoLib.ecies_encrypt(header)
-    # package = CreatePackage(0x8a, ciphertext)
-    # print("SEND Message")
-    # set_control_transfer(0x01 , package)
 elif APP_model_ == DUALPANEL:
     # Flow
     # Step 1 GetPanelNumber
