@@ -17,6 +17,7 @@ NOTIKINTER = 2
 OTA = 3
 DUALPANEL = 4
 APP_model_ = DUALPANEL#NOTIKINTER
+OTA_FILE_PATH = "1809_bin/GPCM2_CM3_strip_Trans_r.bin"
 imgdata = None
 dev = None
 cfg = None
@@ -129,7 +130,7 @@ def send_bytes_over_usb(vid, pid, endpoint_out, directory_path):
     d_clear = bytes.fromhex("FF 04")
     d_end = bytes.fromhex("FF 02")
 
-    ep.write(d_clear)
+    #ep.write(d_clear)
     for bin_file in bin_files:
         file_path = os.path.join(directory_path, bin_file)
         print(f"正在发送文件: {bin_file}")
@@ -605,7 +606,7 @@ elif APP_model_ == OTA:
     package = CreatePackage(0x11, ciphertext)
     print("SEND Message") 
     set_control_transfer(0x01 , package)
-    ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path="1809_bin/GPCM2_CM3_strip_Trans_b.bin")
+    ota_usb_send(vid=0x34C7, pid=0x8888, endpoint_out=0x02, file_path = OTA_FILE_PATH)
 
 elif APP_model_ == DUALPANEL:
     # Flow
