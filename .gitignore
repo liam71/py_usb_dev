@@ -1,0 +1,11 @@
+# 忽略常見 build 輸出
+build/
+__pycache__/
+dist/
+
+# 忽略根目錄的 bin
+/*.bin
+*.spec
+
+# 但保留 1809_bin 底下的 bin
+!1809_bin/*.bin
