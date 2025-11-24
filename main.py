@@ -1,9 +1,11 @@
+import os
+import sys
+os.environ['PATH'] = os.getcwd() + ';' + os.environ.get('PATH', '')
 import usb.core 
 import usb.util
 import numpy as np
 import cv2
 import time
-import os
 import struct
 import tkinter as tk
 from model_dual import *
@@ -249,7 +251,7 @@ def button_click(button_name):
         else:
             isModel = "M4"
         isPUM = True
-    elif button_name is "確認":
+    elif button_name == "確認":
         print("C")
     if button_name == "M0":
         print("M0")
@@ -624,8 +626,13 @@ elif APP_model_ == DUALPANEL:
             if(GetPanelState(index) == 1):
                 break
         time.sleep(0.5)
+    SetSelectPanel(index) 
     panel_num = GetPanelNumber()
     panel_size = GetPanelSize(index)
+    if(panel_size is not None):
+        print(f"高 : ",(panel_size[0]) + (panel_size[1] * 16 * 16))
+        print(f"寬 : ",(panel_size[2]) + (panel_size[3] * 16 * 16))
+    panel_size = GetPanelSize(index-1)
     if(panel_size is not None):
         print(f"高 : ",(panel_size[0]) + (panel_size[1] * 16 * 16))
         print(f"寬 : ",(panel_size[2]) + (panel_size[3] * 16 * 16))

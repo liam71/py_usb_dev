@@ -1,7 +1,7 @@
 import usb.core 
 import usb.util
-import numpy as np
-import cv2
+#import numpy as np
+#import cv2
 import time
 import os
 from example_run_dll import CryptoLib,ECPoint
