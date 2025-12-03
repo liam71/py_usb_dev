@@ -9,14 +9,17 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext
 from typing import Optional
 
-# 添加父目录到路径，以便导入模块
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rt1809_tools_config import __version__, __author__, APP_ICON, OTA, OTA_RES
+from rt1809_tools_config import (
+    __version__, __author__, APP_ICON, OTA, OTA_RES,
+    CHIP_RT1809, CHIP_RT9806
+)
 from rt1809_tools_isp_programmer import ISPProgrammer
 from rt1809_tools_ota_func import (
     GetFwImageNum, GetPanelSourceState, GetPanelState, GetPanelNumber, GetPanelSize,
-    ProgressCallback, ota_usb_send, ota_usb_send_res,
+    ProgressCallback, ota_usb_send, ota_usb_send_res, ota_usb_send_rt9806,
     CreatePackage, CryptoLib, random_key, set_control_transfer
 )
 
@@ -28,12 +31,22 @@ class MainApplication:
         self.get_resource_path = get_resource_path_func
         self.root = tk.Tk()
         self.root.title(f"RacerTech 固件升级工具 v{__version__}")
-        self.root.geometry("550x350")  # 增加窗口大小以适应新布局
+        self.root.geometry("550x350")
         self.root.resizable(False, False)
 
         # 添加烧录时间记录
         self.isp_start_time = None
         self.isp_end_time = None
+
+        # 初始化变量
+        self.is_running = False
+        self.progress_queue = queue.Queue()
+        self.isp_programmer: Optional[ISPProgrammer] = None
+        self.ota_thread = None
+        self.isp_burn_thread = None
+        self.isp_burn_cancel = False
+        self.last_isp_progress = 0
+        self.chip_type = tk.StringVar(value=CHIP_RT1809)  # 芯片类型，默认RT1809
 
         # 设置图标
         self.setup_icon()
@@ -43,15 +56,6 @@ class MainApplication:
         
         # 创建主界面
         self.setup_main_interface()
-        
-        # 初始化变量
-        self.is_running = False
-        self.progress_queue = queue.Queue()
-        self.isp_programmer: Optional[ISPProgrammer] = None
-        self.ota_thread = None
-        self.isp_burn_thread = None
-        self.isp_burn_cancel = False
-        self.last_isp_progress = 0
         
         # 启动进度监控
         self.start_ota_progress_monitor()
@@ -174,7 +178,7 @@ class MainApplication:
         self.refresh_ports()
 
     def setup_ota_tab(self):
-        """设置OTA升级选项卡 - 新布局：文件路径左上，OTA模式左中，进度和按钮左下，设备信息右边"""
+        """设置OTA升级选项卡 """
         # 主容器 - 使用网格布局
         main_container = ttk.Frame(self.ota_frame)
         main_container.pack(fill="both", expand=True)
@@ -182,40 +186,52 @@ class MainApplication:
         # 配置网格权重
         main_container.columnconfigure(0, weight=1)  # 左列
         main_container.columnconfigure(1, weight=1)  # 右列
-        main_container.rowconfigure(0, weight=0)     # 上行 - 文件路径
-        main_container.rowconfigure(1, weight=0)     # 中行 - OTA模式
-        main_container.rowconfigure(2, weight=1)     # 下行 - 进度和按钮
-        main_container.rowconfigure(3, weight=0)     # 底部 - 状态和按钮
+        main_container.rowconfigure(0, weight=0)     # 芯片选择
+        main_container.rowconfigure(1, weight=0)     # 文件路径
+        main_container.rowconfigure(2, weight=0)     # OTA模式
+        main_container.rowconfigure(3, weight=1)     # 传输进度
+        main_container.rowconfigure(4, weight=0)     # 状态和按钮
         
-        # ===== 左上方区域 - 文件路径 =====
-        file_frame = ttk.LabelFrame(main_container, text="文件路径", padding=6)
-        file_frame.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
+        # ===== 第一行 - 芯片选择 =====
+        chip_frame = ttk.Frame(main_container)
+        chip_frame.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
         
-        file_input_frame = ttk.Frame(file_frame)
-        file_input_frame.pack(fill="x", pady=3)
+        ttk.Label(chip_frame, text="芯片:").pack(side="left", padx=(0, 5))
+        self.chip_combo = ttk.Combobox(chip_frame, textvariable=self.chip_type, 
+                                       values=[CHIP_RT1809, CHIP_RT9806], 
+                                       state="readonly", width=10)
+        self.chip_combo.pack(side="left")
+        self.chip_combo.bind("<<ComboboxSelected>>", lambda e: self.on_chip_type_changed())
         
+        # ===== 第二行 - 文件路径 =====
+        file_frame = ttk.Frame(main_container)
+        file_frame.grid(row=1, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
+        file_frame.columnconfigure(1, weight=1)  # 文件输入框可扩展
+        
+        ttk.Label(file_frame, text="文件:").grid(row=0, column=0, padx=(0, 5), sticky="w")
         self.file_var = tk.StringVar()
-        self.file_entry = ttk.Entry(file_input_frame, textvariable=self.file_var)
-        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.file_entry = ttk.Entry(file_frame, textvariable=self.file_var)
+        self.file_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
+        ttk.Button(file_frame, text="浏览", command=self.browse_ota_file, width=6).grid(row=0, column=2)
         
-        ttk.Button(file_input_frame, text="浏览", command=self.browse_ota_file, width=6).pack(side="right")
-        
-        # ===== 左中区域 - OTA模式 =====
+        # ===== 第三行 - OTA模式 =====
         mode_frame = ttk.LabelFrame(main_container, text="OTA模式", padding=6)
-        mode_frame.grid(row=1, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
+        mode_frame.grid(row=2, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
         
         mode_inner_frame = ttk.Frame(mode_frame)
         mode_inner_frame.pack(fill="x", pady=3)
         
         self.mode_var = tk.IntVar(value=OTA)
-        ttk.Radiobutton(mode_inner_frame, text="固件升级", 
-                        variable=self.mode_var, value=OTA).pack(side="left", padx=(10, 20))
-        ttk.Radiobutton(mode_inner_frame, text="影像升级", 
-                        variable=self.mode_var, value=OTA_RES).pack(side="left")
+        self.firmware_radio = ttk.Radiobutton(mode_inner_frame, text="固件升级", 
+                        variable=self.mode_var, value=OTA)
+        self.firmware_radio.pack(side="left", padx=(10, 20))
+        self.resource_radio = ttk.Radiobutton(mode_inner_frame, text="影像升级", 
+                        variable=self.mode_var, value=OTA_RES)
+        self.resource_radio.pack(side="left")
         
-        # ===== 左下方区域 - 传输进度 =====
+        # ===== 第四行 - 传输进度 =====
         progress_frame = ttk.LabelFrame(main_container, text="传输进度", padding=6)
-        progress_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
+        progress_frame.grid(row=3, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
         
         # 进度条
         self.ota_progress = ttk.Progressbar(progress_frame, mode='determinate')
@@ -231,9 +247,9 @@ class MainApplication:
         self.ota_speed_label = ttk.Label(detail_frame, text="0 KB/s", font=("Arial", 8))
         self.ota_speed_label.pack(side="right")
         
-        # ===== 底部区域 - 状态和开始按钮 =====
+        # ===== 第五行 - 状态和开始按钮 =====
         bottom_frame = ttk.Frame(main_container)
-        bottom_frame.grid(row=3, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
+        bottom_frame.grid(row=4, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
         
         self.ota_status_label = ttk.Label(bottom_frame, text="就绪", foreground="green", font=("Arial", 9))
         self.ota_status_label.pack(side="left", pady=5)
@@ -244,7 +260,7 @@ class MainApplication:
         
         # ===== 右侧区域 - 设备信息 =====
         device_frame = ttk.LabelFrame(main_container, text="设备信息", padding=8)
-        device_frame.grid(row=0, column=1, rowspan=4, sticky="nsew", padx=(5, 0))
+        device_frame.grid(row=0, column=1, rowspan=5, sticky="nsew", padx=(5, 0))
         
         # 设备信息内部使用紧凑布局
         device_inner_frame = ttk.Frame(device_frame)
@@ -286,9 +302,18 @@ class MainApplication:
         
         self.panel2_img_label = ttk.Label(panel2_frame, text="", font=("Arial", 9))
         self.panel2_img_label.pack(anchor="w", pady=2)
+        
+        # 初始化芯片类型变更处理（在所有控件创建完成后调用）
+        self.on_chip_type_changed()
 
     def open_video_converter(self):
         """打开视频转换工具窗口"""
+        # 检查芯片类型，RT9806不支持此功能
+        chip = self.chip_type.get()
+        if chip == CHIP_RT9806:
+            messagebox.showwarning("提示", "RT9806芯片不支持影像转换工具功能")
+            return
+        
         try:
             # 动态导入视频转换工具
             from rt1809_tools_video_converter import VideoFrameExtractor
@@ -604,10 +629,36 @@ class MainApplication:
         self.refresh_btn.config(state=tk.NORMAL)
 
     # ==================== OTA功能方法 ====================
+    def on_chip_type_changed(self):
+        """芯片类型变更时的处理"""
+        chip = self.chip_type.get()
+        
+        if chip == CHIP_RT9806:
+            # RT9806只支持固件升级
+            self.mode_var.set(OTA)  # 强制设置为固件升级
+            self.firmware_radio.config(state=tk.NORMAL)
+            self.resource_radio.config(state=tk.DISABLED)
+            self.get_info_btn.config(state=tk.DISABLED)
+            self.video_tool_btn.config(state=tk.DISABLED)
+            # 清空设备信息显示
+            self.reset_panel_displays()
+        else:
+            # RT1809支持所有功能
+            self.firmware_radio.config(state=tk.NORMAL)
+            self.resource_radio.config(state=tk.NORMAL)
+            self.get_info_btn.config(state=tk.NORMAL)
+            self.video_tool_btn.config(state=tk.NORMAL)
+    
     def get_fw_image_number(self):
         """获取设备信息 - 修改后的函数"""
         if self.is_running:
             messagebox.showwarning("警告", "OTA正在进行中，请等待完成后再获取！")
+            return
+        
+        # 检查芯片类型，RT9806不支持此功能
+        chip = self.chip_type.get()
+        if chip == CHIP_RT9806:
+            messagebox.showwarning("提示", "RT9806芯片不支持获取设备信息功能")
             return
         
         try:
@@ -773,9 +824,26 @@ class MainApplication:
     def run_ota(self):
         """在后台线程执行OTA操作"""
         try:
+            chip = self.chip_type.get()
             mode = self.mode_var.get()
             file_path = self.file_var.get()
             
+            # RT9806使用不同的OTA流程
+            if chip == CHIP_RT9806:
+                # RT9806只支持固件升级
+                self.progress_queue.put(('status', "正在连接RT9806设备...", "blue"))
+                
+                # 创建进度回调
+                progress_cb = ProgressCallback()
+                progress_cb.callback = self.ota_progress_callback
+                
+                self.progress_queue.put(('status', "正在进行RT9806固件OTA...", "blue"))
+                success = ota_usb_send_rt9806(file_path=file_path, progress_callback=progress_cb)
+                
+                self.progress_queue.put(('complete', success, None))
+                return
+            
+            # RT1809的原有流程
             # 更新文件路径
             from rt1809_tools_config import OTA_FILE_PATH, OTA_RES_FILE_PATH
             if mode == OTA:
@@ -838,8 +906,17 @@ class MainApplication:
         """OTA完成后的处理"""
         self.is_running = False
         self.ota_start_btn.config(state="normal")
-        self.get_info_btn.config(state="normal")
-        self.video_tool_btn.config(state="normal")
+        
+        # 根据芯片类型恢复按钮状态
+        chip = self.chip_type.get()
+        if chip == CHIP_RT9806:
+            # RT9806模式下，这些按钮保持禁用
+            self.get_info_btn.config(state=tk.DISABLED)
+            self.video_tool_btn.config(state=tk.DISABLED)
+        else:
+            # RT1809模式下，恢复启用
+            self.get_info_btn.config(state=tk.NORMAL)
+            self.video_tool_btn.config(state=tk.NORMAL)
         
         if success:
             self.ota_progress['value'] = 100

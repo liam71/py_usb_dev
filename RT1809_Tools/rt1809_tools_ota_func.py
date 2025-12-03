@@ -10,7 +10,11 @@ from typing import Optional
 import usb.core
 import usb.util
 
-from rt1809_tools_config import FW_SIZE, OTA_TxBLOCK_SIZE
+from rt1809_tools_config import (
+    FW_SIZE, OTA_TxBLOCK_SIZE, 
+    USB_VID_RT1809, USB_PID_RT1809,
+    USB_VID_RT9806, USB_PID_RT9806
+)
 from example_run_dll import CryptoLib, ECPoint
 from example_control import CreatePackage, random_key, set_control_transfer
 
@@ -391,3 +395,247 @@ def verify_ico_file(ico_path):
     except Exception as e:
         print(f"ICO文件验证失败: {e}")
         return False
+
+
+# ==================== RT9806 OTA功能 ====================
+
+# HID常量
+HID_SET_REPORT = 0x09
+HID_OUTPUT_REPORT = 0x02
+REPORT_ID_OTA = 0x06
+UART_BUF_SIZE = 2048
+
+# RT9806 OTA协议定义
+BOOT_KEY_RT9806 = [0x1B, ord('$'), ord('B'), ord('O'), ord('O'), ord('T'), 0x00]
+FIRMWARE_HEADER_RT9806 = [0x43, 0x4D, 0x33, 0x58]  # 'CM3X'
+
+
+def find_rt9806_device(vid=USB_VID_RT9806, pid=USB_PID_RT9806):
+    """查找RT9806 USB设备"""
+    # 尝试使用libusb后端（如果可用）
+    backend = None
+    try:
+        import usb.backend.libusb1
+        backend = usb.backend.libusb1.get_backend()
+    except:
+        pass
+    
+    # 查找设备
+    if backend:
+        dev = usb.core.find(idVendor=vid, idProduct=pid, backend=backend)
+    else:
+        dev = usb.core.find(idVendor=vid, idProduct=pid)
+    
+    if dev is None:
+        return None
+    
+    try:
+        dev.set_configuration()
+    except:
+        try:
+            dev.reset()
+            dev.set_configuration()
+        except:
+            return None
+    
+    return dev
+
+
+def get_rt9806_interface_number(dev):
+    """获取RT9806的HID接口号"""
+    try:
+        cfg = dev.get_active_configuration()
+        for intf in cfg:
+            if intf.bInterfaceClass == 3:  # HID类
+                return intf.bInterfaceNumber
+    except:
+        pass
+    return 0
+
+
+def send_rt9806_data(dev, interface_number, data, report_id=REPORT_ID_OTA, chunk_delay=0.001, progress_callback=None):
+    """通过HID发送数据到RT9806设备"""
+    if dev is None:
+        return False
+    
+    # 每次发送32字节
+    max_chunk = 32
+    offset = 0
+    total_sent = 0
+    
+    while offset < len(data):
+        chunk_size = min(max_chunk, len(data) - offset)
+        report_data = bytearray([report_id]) + bytearray(data[offset:offset + chunk_size])
+        
+        # 填充到33字节
+        if len(report_data) < 33:
+            report_data.extend([0] * (33 - len(report_data)))
+        
+        try:
+            wValue = (HID_OUTPUT_REPORT << 8) | report_id
+            result = dev.ctrl_transfer(
+                bmRequestType=0x21,
+                bRequest=HID_SET_REPORT,
+                wValue=wValue,
+                wIndex=interface_number,
+                data_or_wLength=list(report_data),
+                timeout=5000
+            )
+            
+            if result != len(report_data):
+                print(f"发送失败: 偏移={offset}, 返回={result}")
+                return False
+            
+            total_sent += chunk_size
+            if progress_callback:
+                progress_callback.update(chunk_size)
+                
+        except Exception as e:
+            print(f"发送数据失败: {e}")
+            return False
+        
+        offset += chunk_size
+        time.sleep(chunk_delay)
+    
+    return True
+
+
+def swap_bytes_in_words(data):
+    """每4字节反转顺序（小端转大端）"""
+    result = list(data)
+    while len(result) % 4 != 0:
+        result.append(0)
+    
+    for i in range(0, len(result), 4):
+        result[i], result[i+1], result[i+2], result[i+3] = \
+            result[i+3], result[i+2], result[i+1], result[i]
+    
+    return result
+
+
+def calculate_rt9806_checksum(data):
+    """计算RT9806的32位校验和"""
+    checksum = sum(data) & 0xFFFFFFFF
+    return [
+        (checksum >> 24) & 0xFF,
+        (checksum >> 16) & 0xFF,
+        (checksum >> 8) & 0xFF,
+        checksum & 0xFF
+    ]
+
+
+def ota_usb_send_rt9806(file_path=None, progress_callback=None):
+    """RT9806 OTA固件升级"""
+    # 查找设备
+    dev = find_rt9806_device()
+    if dev is None:
+        raise ValueError('RT9806设备未找到，请检查VID和PID')
+    
+    try:
+        # 获取HID接口号
+        interface_number = get_rt9806_interface_number(dev)
+        
+        # 读取固件文件
+        if file_path is None or not os.path.exists(file_path):
+            raise ValueError('固件文件不存在')
+        
+        with open(file_path, 'rb') as f:
+            firmware_data = list(f.read())
+        
+        firmware_size = len(firmware_data)
+        
+        if firmware_size < 4:
+            raise ValueError('固件数据无效')
+        
+        # 验证固件头部
+        file_header = list(firmware_data[:4])
+        if file_header != FIRMWARE_HEADER_RT9806:
+            raise ValueError(f'固件头部不匹配，期望: {FIRMWARE_HEADER_RT9806}, 实际: {file_header}')
+        
+        if firmware_size > 64 * 1024:
+            raise ValueError('固件超过64KB限制')
+        
+        if progress_callback:
+            progress_callback.set_total(firmware_size)
+        
+        print(f"[RT9806] 开始OTA固件升级，固件大小: {firmware_size} 字节")
+        
+        # 步骤1: 发送启动密钥
+        print("[RT9806] [1/5] 发送启动密钥...")
+        if not send_rt9806_data(dev, interface_number, BOOT_KEY_RT9806, progress_callback=progress_callback):
+            return False
+        print("[RT9806] ✓ 启动密钥发送完成")
+        time.sleep(0.1)
+        
+        # 步骤2: 发送固件大小（小端格式）
+        print("[RT9806] [2/5] 发送固件大小...")
+        size_bytes = [
+            firmware_size & 0xFF,
+            (firmware_size >> 8) & 0xFF,
+            (firmware_size >> 16) & 0xFF,
+            (firmware_size >> 24) & 0xFF
+        ]
+        if not send_rt9806_data(dev, interface_number, size_bytes, progress_callback=progress_callback):
+            return False
+        print(f"[RT9806] ✓ 固件大小发送完成: {firmware_size} 字节")
+        time.sleep(0.1)
+        
+        # 步骤3: 发送固件头部（字节反转）
+        print("[RT9806] [3/5] 发送固件头部...")
+        header_swapped = swap_bytes_in_words(file_header)
+        if not send_rt9806_data(dev, interface_number, header_swapped, progress_callback=progress_callback):
+            return False
+        print("[RT9806] ✓ 固件头部发送完成")
+        time.sleep(0.1)
+        
+        # 步骤4: 发送固件数据
+        print("[RT9806] [4/5] 发送固件数据...")
+        total_packets = (firmware_size + UART_BUF_SIZE - 1) // UART_BUF_SIZE
+        print(f"[RT9806] 数据包: {total_packets} x {UART_BUF_SIZE} 字节")
+        
+        offset = 0
+        packet_num = 0
+        
+        while offset < firmware_size:
+            chunk_size = min(UART_BUF_SIZE, firmware_size - offset)
+            chunk_data = list(firmware_data[offset:offset + chunk_size])
+            
+            # 填充到2048字节
+            if len(chunk_data) < UART_BUF_SIZE:
+                chunk_data.extend([0] * (UART_BUF_SIZE - len(chunk_data)))
+            
+            if not send_rt9806_data(dev, interface_number, chunk_data, chunk_delay=0, progress_callback=progress_callback):
+                print(f"[RT9806] 失败: 数据包 {packet_num + 1}")
+                return False
+            
+            packet_num += 1
+            offset += chunk_size
+            
+            # 显示进度
+            if packet_num % 10 == 0 or packet_num == total_packets:
+                progress = (packet_num / total_packets) * 100
+                print(f"[RT9806] 进度: {packet_num}/{total_packets} ({progress:.1f}%)")
+            
+            time.sleep(0.0001)
+        
+        print(f"[RT9806] ✓ 已发送 {packet_num} 个数据包")
+        
+        # 步骤5: 发送校验和
+        print("[RT9806] [5/5] 发送校验和...")
+        checksum = calculate_rt9806_checksum(firmware_data)
+        send_rt9806_data(dev, interface_number, checksum, progress_callback=progress_callback)
+        #    return False
+        print(f"[RT9806] ✓ 校验和发送完成: 0x{''.join(f'{b:02X}' for b in checksum)}")
+        
+        print("[RT9806] OTA固件升级完成！")
+        return True
+        
+    except Exception as e:
+        print(f"[RT9806] OTA升级失败: {e}")
+        return False
+    finally:
+        if dev:
+            try:
+                usb.util.dispose_resources(dev)
+            except:
+                pass
