@@ -6,7 +6,7 @@ from enum import IntEnum
 USE_GUI = True
 
 # 版本信息
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __author__ = "RacerTech"
 
 APP_ICON = "app.ico"

@@ -96,7 +96,8 @@ class ISPProgrammer:
         """
         timestamp = time.strftime("%H:%M:%S")
         log_msg = f"[{timestamp}] [{level}] {message}"
-        #self.log(log_msg)
+        # 输出到控制台
+        print(log_msg)
         if self.log_callback:
             self.log_callback(log_msg)
     
@@ -407,7 +408,7 @@ class ISPProgrammer:
                 continue
                 
             # 使用稳定性优化的接收方法
-            response = self.receive_with_timeout_and_retry(1, 1, 2, f"接收验证响应")
+            response = self.receive_with_timeout_and_retry(1, 1, 2, f"响应")
             
             if response is None:
                 continue

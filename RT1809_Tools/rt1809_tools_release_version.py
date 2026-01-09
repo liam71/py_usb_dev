@@ -32,12 +32,12 @@ VSVersionInfo(
     StringFileInfo(
       [StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName',  u'RacerTech'),
-        StringStruct(u'FileDescription', u'OTA Tool for USB Firmware/Resource Upgrade'),
+        [StringStruct(u'CompanyName',  u'Racer-Tech'),
+        StringStruct(u'FileDescription', u'UpgradeTool for Racer-Tech'),
         StringStruct(u'FileVersion', u'{version}'),
-        StringStruct(u'InternalName', u'OtaTool'),
-        StringStruct(u'OriginalFilename', u'OtaTools.exe'),
-        StringStruct(u'ProductName', u'OtaTools'),
+        StringStruct(u'InternalName', u'UpgradeTool'),
+        StringStruct(u'OriginalFilename', u'UpgradeTool.exe'),
+        StringStruct(u'ProductName', u'Racer-Tech UpgradeTool'),
         StringStruct(u'ProductVersion', u'{version}')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])

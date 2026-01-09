@@ -20,7 +20,8 @@ from rt1809_tools_isp_programmer import ISPProgrammer
 from rt1809_tools_ota_func import (
     GetFwImageNum, GetPanelSourceState, GetPanelState, GetPanelNumber, GetPanelSize,
     ProgressCallback, ota_usb_send, ota_usb_send_res, ota_usb_send_rt9806,
-    CreatePackage, CryptoLib, random_key, set_control_transfer
+    CreatePackage, CryptoLib, random_key, set_control_transfer,
+    is_driver_mode_available  # 新增：检查驱动模式是否可用
 )
 
 
@@ -130,7 +131,16 @@ class MainApplication:
         self.port_combo.pack(side=tk.LEFT, padx=(0, 10))
         
         self.refresh_btn = ttk.Button(port_frame, text="刷新", command=self.refresh_ports, width=6)
-        self.refresh_btn.pack(side=tk.LEFT)
+        self.refresh_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 波特率选择
+        ttk.Label(port_frame, text="波特率:").pack(side=tk.LEFT, padx=(0, 5))
+        from rt1809_tools_config import ISPConfig
+        self.baudrate_var = tk.StringVar(value=str(ISPConfig.NEW_BAUDRATE))
+        self.baudrate_combo = ttk.Combobox(port_frame, textvariable=self.baudrate_var, 
+                                          values=["307200", "115200"], state="readonly", width=10)
+        self.baudrate_combo.pack(side=tk.LEFT)
+        self.baudrate_combo.bind("<<ComboboxSelected>>", self.on_baudrate_changed)
         
         # 固件选择
         firmware_frame = ttk.Frame(control_frame)
@@ -337,6 +347,43 @@ class MainApplication:
         VideoFrameExtractor(video_window)
 
     # ==================== ISP功能方法 ====================
+    def on_baudrate_changed(self, event=None):
+        """波特率选择变更时的处理"""
+        from rt1809_tools_config import ISPConfig
+        try:
+            baudrate = int(self.baudrate_var.get())
+            ISPConfig.NEW_BAUDRATE = baudrate
+        except ValueError:
+            pass
+    
+    def check_port_available(self, port: str) -> bool:
+        """
+        检测串口是否可用（未被占用）
+        
+        Args:
+            port: 串口名称
+            
+        Returns:
+            True: 串口可用，False: 串口被占用
+        """
+        import serial
+        try:
+            # 尝试打开串口
+            test_port = serial.Serial(
+                port=port,
+                baudrate=115200,  # 使用默认波特率测试
+                timeout=0.1
+            )
+            # 如果成功打开，立即关闭
+            test_port.close()
+            return True
+        except serial.SerialException as e:
+            # 串口被占用或其他错误
+            return False
+        except Exception as e:
+            # 其他异常，也认为不可用
+            return False
+    
     def refresh_ports(self):
         """刷新串口列表"""
         import serial.tools.list_ports
@@ -423,8 +470,21 @@ class MainApplication:
             messagebox.showerror("错误", "固件文件不存在")
             return
         
-        # 检查ISP文件是否存在
+        # 检测串口是否被占用
+        port = self.port_var.get()
+        if not self.check_port_available(port):
+            messagebox.showerror("错误", f"串口 {port} 已被占用，请关闭其他使用该串口的程序后重试")
+            return
+        
+        # 更新波特率配置
         from rt1809_tools_config import ISPConfig
+        try:
+            baudrate = int(self.baudrate_var.get())
+            ISPConfig.NEW_BAUDRATE = baudrate
+        except ValueError:
+            pass
+        
+        # 检查ISP文件是否存在
         if getattr(sys, 'frozen', False):
             isp_cmd_path = os.path.join(sys._MEIPASS, ISPConfig.ISP_CMD_FILE)
             isp_driver_path = os.path.join(sys._MEIPASS, ISPConfig.ISP_DRIVER_FILE)
@@ -457,6 +517,7 @@ class MainApplication:
         self.firmware_entry.config(state=tk.DISABLED)
         self.browse_btn.config(state=tk.DISABLED)
         self.refresh_btn.config(state=tk.DISABLED)
+        self.baudrate_combo.config(state=tk.DISABLED)
         
         # 重置进度和状态
         self.isp_progress_var.set(0)
@@ -627,6 +688,7 @@ class MainApplication:
         self.firmware_entry.config(state=tk.NORMAL)
         self.browse_btn.config(state=tk.NORMAL)
         self.refresh_btn.config(state=tk.NORMAL)
+        self.baudrate_combo.config(state="readonly")
 
     # ==================== OTA功能方法 ====================
     def on_chip_type_changed(self):
@@ -832,6 +894,15 @@ class MainApplication:
             if chip == CHIP_RT9806:
                 # RT9806只支持固件升级
                 self.progress_queue.put(('status', "正在连接RT9806设备...", "blue"))
+                
+                # 检查驱动模式是否可用
+                try:
+                    if is_driver_mode_available():
+                        self.progress_queue.put(('status', "检测到驱动模式，使用驱动进行OTA...", "blue"))
+                    else:
+                        self.progress_queue.put(('status', "使用libusb模式进行OTA...", "blue"))
+                except:
+                    pass
                 
                 # 创建进度回调
                 progress_cb = ProgressCallback()

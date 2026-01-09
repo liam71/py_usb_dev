@@ -525,7 +525,18 @@ def calculate_rt9806_checksum(data):
 
 
 def ota_usb_send_rt9806(file_path=None, progress_callback=None):
-    """RT9806 OTA固件升级"""
+    """RT9806 OTA固件升级 - 自动选择模式（驱动模式优先）"""
+    # 优先使用驱动模式
+    if is_driver_mode_available():
+        print("[RT9806] 检测到驱动模式可用，使用驱动进行OTA...")
+        return ota_usb_send_rt9806_driver(file_path=file_path, progress_callback=progress_callback)
+    else:
+        print("[RT9806] 使用libusb模式进行OTA...")
+        return ota_usb_send_rt9806_libusb(file_path=file_path, progress_callback=progress_callback)
+
+
+def ota_usb_send_rt9806_libusb(file_path=None, progress_callback=None):
+    """RT9806 OTA固件升级 - libusb模式（原有实现）"""
     # 查找设备
     dev = find_rt9806_device()
     if dev is None:
@@ -558,17 +569,17 @@ def ota_usb_send_rt9806(file_path=None, progress_callback=None):
         if progress_callback:
             progress_callback.set_total(firmware_size)
         
-        print(f"[RT9806] 开始OTA固件升级，固件大小: {firmware_size} 字节")
+        print(f"[RT9806-libusb] 开始OTA固件升级，固件大小: {firmware_size} 字节")
         
         # 步骤1: 发送启动密钥
-        print("[RT9806] [1/5] 发送启动密钥...")
+        print("[RT9806-libusb] [1/5] 发送启动密钥...")
         if not send_rt9806_data(dev, interface_number, BOOT_KEY_RT9806, progress_callback=progress_callback):
             return False
-        print("[RT9806] ✓ 启动密钥发送完成")
+        print("[RT9806-libusb] ✓ 启动密钥发送完成")
         time.sleep(0.1)
         
         # 步骤2: 发送固件大小（小端格式）
-        print("[RT9806] [2/5] 发送固件大小...")
+        print("[RT9806-libusb] [2/5] 发送固件大小...")
         size_bytes = [
             firmware_size & 0xFF,
             (firmware_size >> 8) & 0xFF,
@@ -577,21 +588,21 @@ def ota_usb_send_rt9806(file_path=None, progress_callback=None):
         ]
         if not send_rt9806_data(dev, interface_number, size_bytes, progress_callback=progress_callback):
             return False
-        print(f"[RT9806] ✓ 固件大小发送完成: {firmware_size} 字节")
+        print(f"[RT9806-libusb] ✓ 固件大小发送完成: {firmware_size} 字节")
         time.sleep(0.1)
         
         # 步骤3: 发送固件头部（字节反转）
-        print("[RT9806] [3/5] 发送固件头部...")
+        print("[RT9806-libusb] [3/5] 发送固件头部...")
         header_swapped = swap_bytes_in_words(file_header)
         if not send_rt9806_data(dev, interface_number, header_swapped, progress_callback=progress_callback):
             return False
-        print("[RT9806] ✓ 固件头部发送完成")
+        print("[RT9806-libusb] ✓ 固件头部发送完成")
         time.sleep(0.1)
         
         # 步骤4: 发送固件数据
-        print("[RT9806] [4/5] 发送固件数据...")
+        print("[RT9806-libusb] [4/5] 发送固件数据...")
         total_packets = (firmware_size + UART_BUF_SIZE - 1) // UART_BUF_SIZE
-        print(f"[RT9806] 数据包: {total_packets} x {UART_BUF_SIZE} 字节")
+        print(f"[RT9806-libusb] 数据包: {total_packets} x {UART_BUF_SIZE} 字节")
         
         offset = 0
         packet_num = 0
@@ -605,7 +616,7 @@ def ota_usb_send_rt9806(file_path=None, progress_callback=None):
                 chunk_data.extend([0] * (UART_BUF_SIZE - len(chunk_data)))
             
             if not send_rt9806_data(dev, interface_number, chunk_data, chunk_delay=0, progress_callback=progress_callback):
-                print(f"[RT9806] 失败: 数据包 {packet_num + 1}")
+                print(f"[RT9806-libusb] 失败: 数据包 {packet_num + 1}")
                 return False
             
             packet_num += 1
@@ -614,24 +625,24 @@ def ota_usb_send_rt9806(file_path=None, progress_callback=None):
             # 显示进度
             if packet_num % 10 == 0 or packet_num == total_packets:
                 progress = (packet_num / total_packets) * 100
-                print(f"[RT9806] 进度: {packet_num}/{total_packets} ({progress:.1f}%)")
+                print(f"[RT9806-libusb] 进度: {packet_num}/{total_packets} ({progress:.1f}%)")
             
             time.sleep(0.0001)
         
-        print(f"[RT9806] ✓ 已发送 {packet_num} 个数据包")
+        print(f"[RT9806-libusb] ✓ 已发送 {packet_num} 个数据包")
         
         # 步骤5: 发送校验和
-        print("[RT9806] [5/5] 发送校验和...")
+        print("[RT9806-libusb] [5/5] 发送校验和...")
         checksum = calculate_rt9806_checksum(firmware_data)
         send_rt9806_data(dev, interface_number, checksum, progress_callback=progress_callback)
         #    return False
-        print(f"[RT9806] ✓ 校验和发送完成: 0x{''.join(f'{b:02X}' for b in checksum)}")
+        print(f"[RT9806-libusb] ✓ 校验和发送完成: 0x{''.join(f'{b:02X}' for b in checksum)}")
         
-        print("[RT9806] OTA固件升级完成！")
+        print("[RT9806-libusb] OTA固件升级完成！")
         return True
         
     except Exception as e:
-        print(f"[RT9806] OTA升级失败: {e}")
+        print(f"[RT9806-libusb] OTA升级失败: {e}")
         return False
     finally:
         if dev:
@@ -639,3 +650,345 @@ def ota_usb_send_rt9806(file_path=None, progress_callback=None):
                 usb.util.dispose_resources(dev)
             except:
                 pass
+
+
+# ==================== RT9806 驱动模式 OTA 功能 ====================
+# 使用 ctypes（Python 标准库）通过 USBPMIC 驱动进行 OTA
+# 注意：不需要安装 pywin32，只使用标准库 ctypes
+
+import ctypes
+from ctypes import wintypes
+
+# Windows API 常量
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+OPEN_EXISTING = 3
+FILE_ATTRIBUTE_NORMAL = 0x80
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+# 设备接口 GUID (与驱动中的定义一致)
+GUID_DEVINTERFACE_USBPMIC_STR = "{860849a7-3c26-4026-a664-6eb3ef08d259}"
+
+# IOCTL 定义（与驱动中的定义一致）
+USBPMIC_IOCTL_BASE = 0x8000
+METHOD_BUFFERED = 0
+FILE_ANY_ACCESS = 0
+
+def CTL_CODE_OTA(DeviceType, Function, Method, Access):
+    """计算 IOCTL 代码"""
+    return (DeviceType << 16) | (Access << 14) | (Function << 2) | Method
+
+# OTA IOCTL 代码
+IOCTL_USBPMIC_OTA_INIT = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)
+IOCTL_USBPMIC_OTA_SEND_SIZE = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x811, METHOD_BUFFERED, FILE_ANY_ACCESS)
+IOCTL_USBPMIC_OTA_SEND_HEADER = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x812, METHOD_BUFFERED, FILE_ANY_ACCESS)
+IOCTL_USBPMIC_OTA_SEND_DATA = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x813, METHOD_BUFFERED, FILE_ANY_ACCESS)
+IOCTL_USBPMIC_OTA_SEND_CHECKSUM = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x814, METHOD_BUFFERED, FILE_ANY_ACCESS)
+IOCTL_USBPMIC_OTA_SEND_HID = CTL_CODE_OTA(USBPMIC_IOCTL_BASE, 0x815, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+# OTA 常量
+OTA_BLOCK_SIZE = 2048
+OTA_MAX_CHUNK_SIZE = 32
+
+# Windows API 函数设置
+kernel32 = ctypes.windll.kernel32
+setupapi = ctypes.windll.setupapi
+
+class GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", ctypes.c_ulong),
+        ("Data2", ctypes.c_ushort),
+        ("Data3", ctypes.c_ushort),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
+
+class SP_DEVICE_INTERFACE_DATA(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_ulong),
+        ("InterfaceClassGuid", GUID),
+        ("Flags", ctypes.c_ulong),
+        ("Reserved", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+# 常量
+DIGCF_PRESENT = 0x00000002
+DIGCF_DEVICEINTERFACE = 0x00000010
+
+# 设置 SetupAPI 函数原型
+setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.POINTER(GUID), ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_ulong]
+setupapi.SetupDiGetClassDevsW.restype = ctypes.c_void_p
+setupapi.SetupDiEnumDeviceInterfaces.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(GUID), ctypes.c_ulong, ctypes.POINTER(SP_DEVICE_INTERFACE_DATA)]
+setupapi.SetupDiEnumDeviceInterfaces.restype = ctypes.c_bool
+setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [ctypes.c_void_p, ctypes.POINTER(SP_DEVICE_INTERFACE_DATA), ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p]
+setupapi.SetupDiGetDeviceInterfaceDetailW.restype = ctypes.c_bool
+setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
+setupapi.SetupDiDestroyDeviceInfoList.restype = ctypes.c_bool
+
+kernel32.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+kernel32.CreateFileW.restype = ctypes.c_void_p
+kernel32.DeviceIoControl.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p]
+kernel32.DeviceIoControl.restype = ctypes.c_bool
+kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+kernel32.CloseHandle.restype = ctypes.c_bool
+
+
+def guid_from_string(guid_str):
+    """从字符串创建 GUID 结构体"""
+    guid_str = guid_str.strip('{}')
+    parts = guid_str.split('-')
+    guid = GUID()
+    guid.Data1 = int(parts[0], 16)
+    guid.Data2 = int(parts[1], 16)
+    guid.Data3 = int(parts[2], 16)
+    data4_hex = parts[3] + parts[4]
+    data4 = (ctypes.c_ubyte * 8)()
+    for i in range(8):
+        data4[i] = int(data4_hex[i*2:i*2+2], 16)
+    guid.Data4 = data4
+    return guid
+
+
+def find_driver_device_interface():
+    """查找 USBPMIC 驱动设备接口"""
+    interface_guid = guid_from_string(GUID_DEVINTERFACE_USBPMIC_STR)
+    
+    device_info_set = setupapi.SetupDiGetClassDevsW(
+        ctypes.byref(interface_guid),
+        None,
+        None,
+        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
+    )
+    
+    if device_info_set == INVALID_HANDLE_VALUE or device_info_set == 0:
+        return None
+    
+    try:
+        interface_data = SP_DEVICE_INTERFACE_DATA()
+        interface_data.cbSize = ctypes.sizeof(SP_DEVICE_INTERFACE_DATA)
+        
+        result = setupapi.SetupDiEnumDeviceInterfaces(
+            device_info_set,
+            None,
+            ctypes.byref(interface_guid),
+            0,
+            ctypes.byref(interface_data)
+        )
+        
+        if not result:
+            return None
+        
+        required_size = ctypes.c_ulong(0)
+        setupapi.SetupDiGetDeviceInterfaceDetailW(
+            device_info_set,
+            ctypes.byref(interface_data),
+            None,
+            0,
+            ctypes.byref(required_size),
+            None
+        )
+        
+        buffer_size = required_size.value
+        buffer = ctypes.create_string_buffer(buffer_size)
+        
+        cbSize = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 6
+        ctypes.memmove(buffer, ctypes.byref(ctypes.c_ulong(cbSize)), 4)
+        
+        result = setupapi.SetupDiGetDeviceInterfaceDetailW(
+            device_info_set,
+            ctypes.byref(interface_data),
+            buffer,
+            buffer_size,
+            None,
+            None
+        )
+        
+        if result:
+            device_path = ctypes.wstring_at(ctypes.addressof(buffer) + 4)
+            return device_path
+        
+        return None
+    
+    finally:
+        setupapi.SetupDiDestroyDeviceInfoList(device_info_set)
+
+
+def is_driver_mode_available():
+    """检查驱动模式是否可用"""
+    device_path = find_driver_device_interface()
+    return device_path is not None
+
+
+def open_driver_device():
+    """打开驱动设备"""
+    device_path = find_driver_device_interface()
+    if device_path is None:
+        return None
+    
+    handle = kernel32.CreateFileW(
+        device_path,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        None
+    )
+    
+    if handle == INVALID_HANDLE_VALUE or handle == 0:
+        return None
+    
+    return handle
+
+
+def driver_send_ioctl(handle, ioctl_code, input_data=None):
+    """发送 IOCTL 到驱动"""
+    input_buffer = None
+    input_size = 0
+    
+    if input_data:
+        if isinstance(input_data, int):
+            input_buffer = ctypes.create_string_buffer(struct.pack('<I', input_data), 4)
+            input_size = 4
+        elif isinstance(input_data, (bytes, bytearray)):
+            input_buffer = ctypes.create_string_buffer(bytes(input_data), len(input_data))
+            input_size = len(input_data)
+        elif isinstance(input_data, list):
+            data_bytes = bytes(input_data)
+            input_buffer = ctypes.create_string_buffer(data_bytes, len(data_bytes))
+            input_size = len(data_bytes)
+    
+    bytes_returned = ctypes.c_ulong(0)
+    
+    result = kernel32.DeviceIoControl(
+        handle,
+        ioctl_code,
+        input_buffer,
+        input_size,
+        None,
+        0,
+        ctypes.byref(bytes_returned),
+        None
+    )
+    
+    return result
+
+
+def ota_usb_send_rt9806_driver(file_path=None, progress_callback=None):
+    """RT9806 OTA固件升级 - 驱动模式"""
+    # 打开设备
+    handle = open_driver_device()
+    if handle is None:
+        raise ValueError('无法打开USBPMIC驱动设备，请检查驱动是否正确安装')
+    
+    try:
+        # 读取固件文件
+        if file_path is None or not os.path.exists(file_path):
+            raise ValueError('固件文件不存在')
+        
+        with open(file_path, 'rb') as f:
+            firmware_data = f.read()
+        
+        firmware_size = len(firmware_data)
+        
+        if firmware_size < 4:
+            raise ValueError('固件数据无效')
+        
+        # 验证固件头部
+        file_header = list(firmware_data[:4])
+        if file_header != FIRMWARE_HEADER_RT9806:
+            raise ValueError(f'固件头部不匹配，期望: {FIRMWARE_HEADER_RT9806}, 实际: {file_header}')
+        
+        if firmware_size > 64 * 1024:
+            raise ValueError('固件超过64KB限制')
+        
+        if progress_callback:
+            progress_callback.set_total(firmware_size)
+        
+        print(f"[RT9806-Driver] 开始OTA固件升级，固件大小: {firmware_size} 字节")
+        
+        # 步骤1: 发送启动密钥 (通过 OTA_INIT IOCTL)
+        print("[RT9806-Driver] [1/5] 发送启动密钥...")
+        if not driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_INIT):
+            error = kernel32.GetLastError()
+            print(f"[RT9806-Driver] 发送启动密钥失败，错误代码: {error}")
+            return False
+        print("[RT9806-Driver] ✓ 启动密钥发送完成")
+        time.sleep(0.1)
+        
+        # 步骤2: 发送固件大小
+        print("[RT9806-Driver] [2/5] 发送固件大小...")
+        if not driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_SEND_SIZE, firmware_size):
+            error = kernel32.GetLastError()
+            print(f"[RT9806-Driver] 发送固件大小失败，错误代码: {error}")
+            return False
+        print(f"[RT9806-Driver] ✓ 固件大小发送完成: {firmware_size} 字节")
+        time.sleep(0.1)
+        
+        # 步骤3: 发送固件头部
+        print("[RT9806-Driver] [3/5] 发送固件头部...")
+        if not driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_SEND_HEADER, file_header):
+            error = kernel32.GetLastError()
+            print(f"[RT9806-Driver] 发送固件头部失败，错误代码: {error}")
+            return False
+        print("[RT9806-Driver] ✓ 固件头部发送完成")
+        time.sleep(0.1)
+        
+        # 步骤4: 发送固件数据
+        print("[RT9806-Driver] [4/5] 发送固件数据...")
+        total_packets = (firmware_size + OTA_BLOCK_SIZE - 1) // OTA_BLOCK_SIZE
+        print(f"[RT9806-Driver] 数据包: {total_packets} x {OTA_BLOCK_SIZE} 字节")
+        
+        offset = 0
+        packet_num = 0
+        
+        while offset < firmware_size:
+            chunk_size = min(OTA_BLOCK_SIZE, firmware_size - offset)
+            chunk_data = firmware_data[offset:offset + chunk_size]
+            
+            # 填充到2048字节
+            if len(chunk_data) < OTA_BLOCK_SIZE:
+                chunk_data = chunk_data + bytes([0] * (OTA_BLOCK_SIZE - len(chunk_data)))
+            
+            if not driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_SEND_DATA, chunk_data):
+                error = kernel32.GetLastError()
+                print(f"[RT9806-Driver] 发送数据包 {packet_num + 1} 失败，错误代码: {error}")
+                return False
+            
+            packet_num += 1
+            offset += chunk_size
+            
+            if progress_callback:
+                progress_callback.update(chunk_size)
+            
+            # 显示进度
+            if packet_num % 10 == 0 or packet_num == total_packets:
+                progress = (packet_num / total_packets) * 100
+                print(f"[RT9806-Driver] 进度: {packet_num}/{total_packets} ({progress:.1f}%)")
+            
+            time.sleep(0.0001)
+        
+        print(f"[RT9806-Driver] ✓ 已发送 {packet_num} 个数据包")
+        
+        # 步骤5: 发送校验和
+        print("[RT9806-Driver] [5/5] 发送校验和...")
+        checksum = calculate_rt9806_checksum(list(firmware_data))
+        driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_SEND_CHECKSUM, checksum)
+        '''
+        if not driver_send_ioctl(handle, IOCTL_USBPMIC_OTA_SEND_CHECKSUM, checksum):
+            error = kernel32.GetLastError()
+            print(f"[RT9806-Driver] 发送校验和失败，错误代码: {error}")
+            return False
+        '''
+        print(f"[RT9806-Driver] ✓ 校验和发送完成: 0x{''.join(f'{b:02X}' for b in checksum)}")
+        
+        print("[RT9806-Driver] OTA固件升级完成！")
+        return True
+        
+    except Exception as e:
+        print(f"[RT9806-Driver] OTA升级失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        if handle:
+            kernel32.CloseHandle(handle)
