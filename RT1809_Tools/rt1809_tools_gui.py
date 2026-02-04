@@ -385,12 +385,35 @@ class MainApplication:
             return False
     
     def refresh_ports(self):
-        """刷新串口列表"""
+        """刷新串口列表 - 验证串口是否真的可用"""
         import serial.tools.list_ports
-        ports = [port.device for port in serial.tools.list_ports.comports()]
-        self.port_combo['values'] = ports
-        if ports:
-            self.port_combo.current(0)
+        
+        # 获取所有串口
+        all_ports = [port.device for port in serial.tools.list_ports.comports()]
+        
+        # 验证每个串口是否真的可用（过滤掉已拔出的串口）
+        available_ports = []
+        for port in all_ports:
+            if self.check_port_available(port):
+                available_ports.append(port)
+        
+        # 更新串口列表
+        self.port_combo['values'] = available_ports
+        
+        # 检查当前选中的串口是否仍然可用
+        current_port = self.port_var.get()
+        if current_port:
+            if current_port not in available_ports:
+                # 当前串口已不可用，清空选择
+                self.port_var.set("")
+        
+        # 如果有可用串口，默认选择第一个
+        if available_ports:
+            if not self.port_var.get():
+                self.port_combo.current(0)
+        else:
+            # 没有可用串口，清空选择
+            self.port_var.set("")
 
     def browse_firmware(self):
         """浏览选择固件文件"""
@@ -473,7 +496,7 @@ class MainApplication:
         # 检测串口是否被占用
         port = self.port_var.get()
         if not self.check_port_available(port):
-            messagebox.showerror("错误", f"串口 {port} 已被占用，请关闭其他使用该串口的程序后重试")
+            messagebox.showerror("错误", f"串口 {port} 已被占用或不存在，请刷新或检查串口的占用情况后重试")
             return
         
         # 更新波特率配置

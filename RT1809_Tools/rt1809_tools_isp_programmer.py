@@ -169,7 +169,7 @@ class ISPProgrammer:
                 if self.protocol.serial_port and self.protocol.serial_port.is_open:
                     self.protocol.serial_port.reset_input_buffer()
                 
-        self.log(f"{operation_name}失败，请检查串口连接", "ERROR")
+        self.log(f"{operation_name}失败，请检查串口连接或切换波特率后重试", "ERROR")
         return None
     
     def update_address_display(self, operation: str, address: int):
