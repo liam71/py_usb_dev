@@ -612,49 +612,131 @@ elif APP_model_ == OTA:
 
 elif APP_model_ == DUALPANEL:
     # Flow
-    # Step 1 GetPanelNumber
-    # Step 2 GetPanelSize
-    # Step 3 GetPanelDirect
-    # Step 4 GetPanelShape
-    # Step 5 SelectPanel
-    # Step 6 SendStartCmd
-    # Step 7 SendData
-    # Step 8 SendEndCmd
-    index = 1
+    # Step 1 GetPanelNumber - 获取屏幕数量
+    # Step 2 GetPanelSize - 获取屏幕尺寸
+    # Step 3 GetPanelDirect - 获取屏幕方向
+    # Step 4 GetPanelShape - 获取屏幕形状
+    # Step 5 SelectPanel - 选择屏幕
+    # Step 6 SendStartCmd - 发送开始命令
+    # Step 7 SendData - 发送数据
+    # Step 8 SendEndCmd - 发送结束命令
+    
+    # 辅助函数：统一获取返回值的第一个元素（兼容 int 和 array）
+    def get_value(result, index=0):
+        if result is None:
+            return None
+        if isinstance(result, int):
+            return result
+        try:
+            return result[index]
+        except (TypeError, IndexError):
+            return result
+    
+    # 等待设备就绪
+    # GetPanelSourceState 返回值: 0=logo, 1=background, 2=usb
+    # 返回值 > 0 表示设备已初始化
     for i in range(1, 10):
-        if(GetPanelSourceState() == 1):
-            if(GetPanelState(index) == 1):
-                break
+        source_state = GetPanelSourceState()
+        state_val = get_value(source_state)
+        if state_val is not None and state_val > 0:
+            print(f"Device ready, source state: {state_val}")
+            break
         time.sleep(0.5)
-    SetSelectPanel(index) 
+    
+    # 获取屏幕数量，决定使用的索引
     panel_num = GetPanelNumber()
+    num_panels = get_value(panel_num) or 1
+    print(f"Panel count: {num_panels}")
+    
+    # 重要：索引从 0 开始，单屏时只有 index=0 有效
+    # 单屏模式: index=0, 双屏模式: index=0 或 1
+    if num_panels == 1:
+        index = 0  # 单屏模式，必须用 index 0
+    else:
+        index = 1  # 双屏模式，可以选择 0 或 1
+    print(f"Using panel index: {index}")
+    
+    # 选择屏幕
+    SetSelectPanel(index)
+    
+    # 获取当前屏幕尺寸
     panel_size = GetPanelSize(index)
-    if(panel_size is not None):
-        print(f"高 : ",(panel_size[0]) + (panel_size[1] * 16 * 16))
-        print(f"寬 : ",(panel_size[2]) + (panel_size[3] * 16 * 16))
-    panel_size = GetPanelSize(index-1)
-    if(panel_size is not None):
-        print(f"高 : ",(panel_size[0]) + (panel_size[1] * 16 * 16))
-        print(f"寬 : ",(panel_size[2]) + (panel_size[3] * 16 * 16))
+    if panel_size is not None:
+        # 16位小端序: h = [0]+[1]*256, w = [2]+[3]*256
+        height = get_value(panel_size, 0) + (get_value(panel_size, 1) * 256)
+        width = get_value(panel_size, 2) + (get_value(panel_size, 3) * 256)
+        print(f"Panel {index} size: {width}x{height}")
+    
+    # 如果是双屏，获取另一个屏幕的尺寸
+    if num_panels > 1:
+        other_index = 0 if index == 1 else 1
+        panel_size = GetPanelSize(other_index)
+        if panel_size is not None:
+            height = get_value(panel_size, 0) + (get_value(panel_size, 1) * 256)
+            width = get_value(panel_size, 2) + (get_value(panel_size, 3) * 256)
+            print(f"Panel {other_index} size: {width}x{height}")
+    
     panel_direct = GetPanelDirect(index)
     panel_shape = GetPanelShape(index)
+    
+    # 配置加密密钥
     package = CreatePackage(0x32, random_key)
     CryptoLib.config_key_function(random_key)
     SetCmdKeyAndCiphertext(package)
+    
+    # 发送启动命令
     start = "star"
     ascii_list = [ord(c) for c in start]
     ciphertext = CryptoLib.ecies_encrypt(ascii_list)
     package = CreatePackage(0x11, ciphertext)
     SetCmdKeyAndCiphertext(package)
-    GetPanelProcessState(index)
-    for i in range(1,10):
-        if (GetPanelState(index) == 1):
-            save_image_rgb565_bin("image/SCN.png", "test1.bin")
+    
+    # 检查处理状态 (ProcessState == 1 表示加密验证通过)
+    process_state = GetPanelProcessState(index)
+    process_val = get_value(process_state)
+    print(f"Process state (encryption verify): {process_val}")
+    
+    # 加密验证通过后就可以发送图像，不需要等待 PanelState
+    # PanelState 会在 DMA 传输过程中变为 0，传输完成后变为 1
+    if process_val == 1:  # ver_pass
+        print(f"Encryption verified, sending image to panel {index}...")
+        save_image_rgb565_bin("image/SCN.png", "test1.bin")
+        send_bytes_over_usb(vid=0x34C7, pid=0x8888, endpoint_out=0x02, directory_path=".")
+        print("Image sent successfully!")
+        
+        # 重要：发送完数据后等待设备处理完成
+        # 设备正忙于 DMA 传输时可能无法响应控制传输
+        print("Waiting for device to process data...")
+        time.sleep(1.0)  # 等待设备 DMA 传输完成
+        
+        # 等待传输完成（带错误处理）
+        transfer_complete = False
+        for i in range(1, 10):
+            try:
+                panel_state = GetPanelState(index)
+                state_val = get_value(panel_state)
+                print(f"Panel state check {i}: {state_val}")
+                if state_val == 1:
+                    print(f"Panel {index} transfer complete!")
+                    transfer_complete = True
+                    break
+            except Exception as e:
+                print(f"Warning: Failed to get panel state (attempt {i}): {e}")
+            time.sleep(0.5)
+        
+        if not transfer_complete:
+            print("Note: Could not confirm transfer completion, but image data was sent.")
+        
+        # 双屏模式下发送到另一个屏幕
+        if num_panels > 1:
+            other_index = 0 if index == 1 else 1
+            SetSelectPanel(other_index)
+            print(f"Sending image to panel {other_index}...")
+            time.sleep(0.5)  # 等待屏幕切换
             send_bytes_over_usb(vid=0x34C7, pid=0x8888, endpoint_out=0x02, directory_path=".")
-            SetSelectPanel(0 if index == 1 else 1) 
-            if(GetPanelState(index) == 1):
-                send_bytes_over_usb(vid=0x34C7, pid=0x8888, endpoint_out=0x02, directory_path=".")
-            break
+            print("Image sent to second panel!")
+    else:
+        print(f"Encryption verification failed! Process state: {process_val}")
     
 
     

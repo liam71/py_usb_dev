@@ -7,9 +7,9 @@ import os
 from example_run_dll import CryptoLib,ECPoint
 from example_KeyPackage import KeyPackage
 from typing import overload, Union
-def usb_control_transfer(vid, pid, bmRequestType, bRequest, wValue=0, wIndex=0, data_or_wLength=None, timeout=1000):
+def usb_control_transfer(vid, pid, bmRequestType, bRequest, wValue=0, wIndex=0, data_or_wLength=None, timeout=1000, retry_count=2):
     """
-    執行 USB Control Transfer
+    執行 USB Control Transfer（带重试机制）
     :param vid: USB設備VID
     :param pid: USB設備PID
     :param bmRequestType: 請求類型 (8位)
@@ -18,33 +18,107 @@ def usb_control_transfer(vid, pid, bmRequestType, bRequest, wValue=0, wIndex=0, 
     :param wIndex: 索引值 (16位)
     :param data_or_wLength: 數據緩衝區或長度
     :param timeout: 超時時間(毫秒)
+    :param retry_count: 重試次數（默认2次，总共尝试3次）
     :return: 傳輸的數據
     """
-    # 查找 USB 設備
-    dev = usb.core.find(idVendor=vid, idProduct=pid)
-    if dev is None:
-        raise ValueError('設備未找到，請檢查VID和PID')
+    dev = None
+    last_error = None
+    
+    # 重试机制
+    for attempt in range(retry_count + 1):
+        try:
+            # 查找 USB 設備
+            dev = usb.core.find(idVendor=vid, idProduct=pid)
+            if dev is None:
+                raise ValueError('設備未找到，請檢查VID和PID')
 
-    try:
-        # 設置配置
-        dev.set_configuration()
-        
-        # 執行 Control Transfer
-        result = dev.ctrl_transfer(
-            bmRequestType=bmRequestType,
-            bRequest=bRequest,
-            wValue=wValue,
-            wIndex=wIndex,
-            data_or_wLength=data_or_wLength,
-            timeout=timeout
-        )
-        
-        return result
-    except usb.core.USBError as e:
-        print(f"USB Control Transfer 錯誤: {str(e)}")
-        raise
-    finally:
-        dev = None
+            # 設置配置（如果尚未設置）
+            try:
+                dev.set_configuration()
+            except usb.core.USBError as e:
+                # 如果配置已經設置，忽略此錯誤
+                if "already" not in str(e).lower() and "busy" not in str(e).lower():
+                    raise
+            
+            # 執行 Control Transfer
+            result = dev.ctrl_transfer(
+                bmRequestType=bmRequestType,
+                bRequest=bRequest,
+                wValue=wValue,
+                wIndex=wIndex,
+                data_or_wLength=data_or_wLength,
+                timeout=timeout
+            )
+            
+            # 成功，释放资源并返回
+            if dev is not None:
+                try:
+                    usb.util.dispose_resources(dev)
+                except:
+                    pass
+                dev = None
+            
+            return result
+            
+        except usb.core.USBError as e:
+            last_error = e
+            error_str = str(e).lower()
+            # Pipe error 或其他错误，如果是最后一次尝试则抛出
+            if attempt < retry_count:
+                # 对于 Pipe error，增加延迟重试
+                if "pipe" in error_str or "errno 32" in error_str:
+                    delay = 0.5 * (attempt + 1)  # 递增延迟：0.5s, 1.0s, 1.5s
+                    print(f"[信息] Pipe error，等待 {delay:.1f} 秒后重试...")
+                    time.sleep(delay)
+                    if dev is not None:
+                        try:
+                            usb.util.dispose_resources(dev)
+                        except:
+                            pass
+                        dev = None
+                    continue
+            # 最后一次尝试或非Pipe错误，打印错误并抛出
+            if attempt == retry_count:
+                print(f"USB Control Transfer 錯誤 (尝试 {attempt + 1}/{retry_count + 1}): {str(e)}")
+            if dev is not None:
+                try:
+                    usb.util.dispose_resources(dev)
+                except:
+                    pass
+                dev = None
+            if attempt == retry_count:
+                raise
+        except Exception as e:
+            last_error = e
+            if attempt < retry_count:
+                time.sleep(0.1 * (attempt + 1))
+                if dev is not None:
+                    try:
+                        usb.util.dispose_resources(dev)
+                    except:
+                        pass
+                    dev = None
+                continue
+            else:
+                if dev is not None:
+                    try:
+                        usb.util.dispose_resources(dev)
+                    except:
+                        pass
+                    dev = None
+                raise
+        finally:
+            # 确保释放资源
+            if dev is not None:
+                try:
+                    usb.util.dispose_resources(dev)
+                except:
+                    pass
+                dev = None
+    
+    # 如果所有重试都失败
+    if last_error:
+        raise last_error
 
 def get_control_transfer(mValue : int, dataLen : int):
 

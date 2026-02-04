@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec.bak
+*.spec
+*.exe
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# 项目特定文件
+*.log
+*.tmp
+*.bak
+*.cache
+
+# 临时文件
+~$*.docx
+~$*.doc
+*.tmp
+
+# 构建产物（保留dist目录结构但忽略内容）
+dist/*.exe
+dist/*.zip
+dist/*.dll
+dist/*.docx
+!dist/.gitkeep
+
+# 二进制文件（如果不需要版本控制）
+# *.bin
+# *.dll
+# *.ico
+
+# 文档临时文件
+*.docx.bak
+

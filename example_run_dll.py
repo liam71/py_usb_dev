@@ -29,7 +29,7 @@ class ECPoint(Structure):
 def load_crypto_library():
     system = platform.system()
     if system == "Windows":
-        lib_name = "RacerTech_RT9806_SDK.dll"
+        lib_name = "RacerTech_RT1809_SDK.dll"
     elif system == "Darwin":  # macOS
         lib_name = "RacerTech_RT1809_SDK.dylib"
     else:  # Linux

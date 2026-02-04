@@ -15,6 +15,7 @@ def GetPanelNumber():
         return device_desc[0] 
     except Exception as e:
         print(f"GetPanelNumber Fail: {str(e)}")
+        return 0  # 返回默认值
 
 def GetPanelSize(wIndex = 0):
     try:
@@ -31,6 +32,7 @@ def GetPanelSize(wIndex = 0):
         return device_desc
     except Exception as e:
         print(f"GetPanelSize Fail: {str(e)}")
+        return None  # 返回None，调用处需要检查
 
 def GetPanelDirect(wIndex = 0):
     try:
@@ -47,6 +49,7 @@ def GetPanelDirect(wIndex = 0):
         return device_desc[0] 
     except Exception as e:
         print(f"GetPanelDirect Fail: {str(e)}")
+        return 0  # 返回默认值
 
 def GetPanelShape(wIndex = 0):
     try:
@@ -63,6 +66,7 @@ def GetPanelShape(wIndex = 0):
         return device_desc[0] 
     except Exception as e:
         print(f"GetPanelShape Fail: {str(e)}")
+        return 0  # 返回默认值
 
 def GetPanelState(wIndex = 0):
     try:
@@ -79,6 +83,7 @@ def GetPanelState(wIndex = 0):
         return device_desc[0] 
     except Exception as e:
         print(f"GetPanelState Fail: {str(e)}")
+        return 0  # 返回默认值（0表示未就绪）
 
 def GetPanelProcessState(wIndex = 0):
     try:
@@ -95,6 +100,7 @@ def GetPanelProcessState(wIndex = 0):
         return device_desc[0] 
     except Exception as e:
         print(f"GetPanelProcessState Fail: {str(e)}")
+        return 0  # 返回默认值
 
 def SetSelectPanel(wIndex = 0):
     try:
@@ -140,4 +146,5 @@ def GetPanelSourceState(wIndex = 0):
         print("GetPanelSourceState :", device_desc)
         return device_desc[0] 
     except Exception as e:
-        print(f"GetPanelProcessState Fail: {str(e)}")
+        print(f"GetPanelSourceState Fail: {str(e)}")  # 修复错误消息
+        return 0  # 返回默认值（0表示未就绪）
